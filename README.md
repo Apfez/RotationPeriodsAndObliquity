@@ -15,3 +15,8 @@ Top left: Rotation period and uncertainty as per the first plot. Top middle: Ste
 Middle: Inferred probability density of the stellar inclination i_s from vsini and v as per Masuda and Winn 2020 in red. Orbital inclination in blue and Projected obliquity in green from the literature. And the inferred probability density of the stellar obliquity colored in accordance with the colormap also used for the bottom figures.
 Bottom: 3D view of the stellar obliquity probability. Values of the stellar obliquity are shown as contours emanating from the mean value of the axis of orbital angular momentum, n_o. All relevant angles are shown in this plot too.
 All parameters are taken from the NASA Exoplanet Archive (https://exoplanetarchive.ipac.caltech.edu/) and/or TEPCat (https://www.astro.keele.ac.uk/jkt/tepcat/obliquity.html)
+![wasp-7 jackknives](https://user-images.githubusercontent.com/63327679/166901054-63dc134a-0505-4a3f-ac6d-6ddb6b5cf5cb.png)
+Robustness tests of the found period. 
+Top left and right: Holes cut out of the light curve and corresponding Auto-Correlation-Function as well as the determined period. 
+Middle left: Found rotation periods as a function of the size of the cut. Middle right: relative peak height of the peak of the found period as a functino of the size of the cut.
+Bottom: Auto-Correlation function where cuts are taken from beginning and end of lightcurve and colored according to the fraction left of the lightcurve.
