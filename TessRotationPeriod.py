@@ -5,6 +5,14 @@ import matplotlib.pyplot as plt
 import copy
 import matplotlib as mpl
 import pandas as pd
+"""
+import os
+import sys
+import inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+
+sys.path.insert(0, currentdir) 
+"""
 import ObliquityFromLambdaPVsini as obl
 import time
 
@@ -24,8 +32,7 @@ plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 class System(object):
 
     def __init__(self, name, T_eff=None, vsini=None, vsini_err=None, R=None, R_err=None,
-                 transit_first_time=None, transit_duration=None, orbital_period=None,
-                 gaussian_kernel_width_hours=1000, split_lc=True, override_period=None,
+                 transit_first_time=None, transit_duration=None, orbital_period=None, split_lc=True, override_period=None,
                  lmbda=None, lmbda_err1=None, lmbda_err2=None, i_o=np.pi/2, i_o_err=2*np.pi/180):
 
         self.name = name
@@ -42,7 +49,7 @@ class System(object):
         self.transit_first_time = transit_first_time
         self.transit_duration = transit_duration
         self.orbital_period = orbital_period
-        self.gaussian_kernel_width_hours = gaussian_kernel_width_hours
+
         self.split_lc = split_lc
         self.lccs = None
         self.title = None
@@ -87,6 +94,7 @@ class lc_container(object):
 
         self.found_rotation_period = None
         self.found_rotation_period_err = None
+        self.gaussian_kernel_width_hours = 0
 
 
 def fill_gaps(lc):
@@ -124,7 +132,7 @@ def fill_gaps(lc):
     return lc
 
 
-def ACF(ss, t, f, timestep=2):
+def ACF(ss, lcc, t, f, timestep=2):
     dt = np.nanmedian(t[1:] - t[:-1])
     N = len(f)
 
@@ -144,81 +152,80 @@ def ACF(ss, t, f, timestep=2):
 
         ac_y[k - 1] = top / bot
 
-    kernel_width = ss.gaussian_kernel_width_hours
-    errors = []
-    if kernel_width == 0:
+    if lcc.gaussian_kernel_width_hours == 0:
+        lcc.gaussian_kernel_width_hours = estimate_kernel_width(ss, ac_x, ac_y, timestep)
 
-        def estimate_kernel_width(ac_x, ac_y):  # purely magical numbers. Don't even ask... xD
-
-            max_width = np.min([ss.max_rotation_period, ac_x[-1]])/2 * 24
-
-            m = 50
-            id_min_interval = 1
-            widths = np.linspace(max_width/m, max_width, m)
-            found_min_interval = False
-
-            for c, w in enumerate(widths):
-
-                y = gaussian_filter(ac_y, 3600 * w / (timestep * ss.exptime))
-                grad = np.gradient(y)
-
-                # change from positive to negative gradient means a local maximum
-                local_max_index = np.where(np.diff(np.sign(grad)) < 0)[0]
-
-                maxs_x = ac_x[local_max_index]  # x-values of local minima
-
-                if len(maxs_x) > 1:
-                    min_dist_between_peaks = 24*np.min(np.abs(np.diff(maxs_x)))
-                else:
-                    min_dist_between_peaks = np.inf
-
-                error = np.sum((y - ac_y) ** 2) / len(y)
-                errors.append(error)
-
-                # fig, ax = plt.subplots()
-                # ax.plot(ac_x, y)
-                # ax.set_title('w: ' + str(w))
-
-                if len(maxs_x) == 0:
-                    peak_num = 0.0001
-                else:
-                    peak_num = len(maxs_x)
-
-                # print("min peak dists" + str(min_dist_between_peaks))
-                # print("avg peak dist" + str((ac_x[-1] * 24) / peak_num))
-                # print("rel error" + str(error / errors[0]))
-
-                if min_dist_between_peaks > 12 and (ac_x[-1]*24)/peak_num > 24 and found_min_interval is False:  # found estimate when: A) no two peaks closer than 20 hours apart and B) the average peak distance longer than 1d and C) the error between smoothed and unsmoothed is at least twice the error of the first run (1h gaussian kernel)
-                    id_min_interval = np.max([1, c - 1])
-                    found_min_interval = True
-                    # print("minimum width due to min peak dist and avg peak dists (hours): " + str(widths[id_min_interval]))
-
-            Y_frac = errors[-1]/errors[0]
-            #err0_min = np.max([errors[0], 0.02*Y_frac])
-
-            rel_err = errors[0] + 0.5*(errors[-1] - errors[0])/np.sqrt(Y_frac)
-            rel_err = np.min([rel_err, errors[0] + 0.6*(errors[-1] - errors[0])])
-            min_error_index = np.argmin(np.abs(errors - rel_err))
-            est = np.max([widths[min_error_index], widths[id_min_interval]])
-
-            # fig, ax = plt.subplots()
-            # ax.plot(widths, errors)
-            # ax.scatter(widths[min_error_index], errors[min_error_index], c='r')
-            # plt.show()
-            # print('last rel error: ' + str(errors[-1]/errors[0]))
-            # print('est 1 (relative error): ' + str(widths[min_error_index]))
-            # print('est 2 (distance between peaks): ' + str(widths[id_min_interval]))
-            print("Estimated kernel width = %1.1fh" % est)
-            return est
-
-        kernel_width = estimate_kernel_width(ac_x, ac_y)
-
-    expt = 3600 * kernel_width / (timestep * ss.exptime)  # gaussian kernel width in units of hours
+    expt = 3600 * lcc.gaussian_kernel_width_hours / (timestep * ss.exptime)  # gaussian kernel width in units of hours
 
     ac_y_smoothed = gaussian_filter(ac_y, expt)
     ac_y = gaussian_filter(ac_y, 0.01 * expt)
 
     return ac_x, ac_y, ac_y_smoothed
+
+
+def estimate_kernel_width(ss, ac_x, ac_y, timestep):  # purely magical numbers. Don't even ask... xD
+    errors = []
+    max_width = np.min([ss.max_rotation_period, ac_x[-1]]) / 2 * 24
+
+    m = 50
+    id_min_interval = 1
+    widths = np.linspace(max_width / m, max_width, m)
+    found_min_interval = False
+
+    for c, w in enumerate(widths):
+
+        y = gaussian_filter(ac_y, 3600 * w / (timestep * ss.exptime))
+        grad = np.gradient(y)
+
+        # change from positive to negative gradient means a local maximum
+        local_max_index = np.where(np.diff(np.sign(grad)) < 0)[0]
+
+        maxs_x = ac_x[local_max_index]  # x-values of local minima
+
+        if len(maxs_x) > 1:
+            min_dist_between_peaks = 24 * np.min(np.abs(np.diff(maxs_x)))
+        else:
+            min_dist_between_peaks = np.inf
+
+        error = np.sum((y - ac_y) ** 2) / len(y)
+        errors.append(error)
+
+        # fig, ax = plt.subplots()
+        # ax.plot(ac_x, y)
+        # ax.set_title('w: ' + str(w))
+
+        if len(maxs_x) == 0:
+            peak_num = 0.0001
+        else:
+            peak_num = len(maxs_x)
+
+        # print("min peak dists" + str(min_dist_between_peaks))
+        # print("avg peak dist" + str((ac_x[-1] * 24) / peak_num))
+        # print("rel error" + str(error / errors[0]))
+
+        if min_dist_between_peaks > 12 and (ac_x[
+                                                -1] * 24) / peak_num > 24 and found_min_interval is False:  # found estimate when: A) no two peaks closer than 20 hours apart and B) the average peak distance longer than 1d and C) the error between smoothed and unsmoothed is at least twice the error of the first run (1h gaussian kernel)
+            id_min_interval = np.max([1, c - 1])
+            found_min_interval = True
+            # print("minimum width due to min peak dist and avg peak dists (hours): " + str(widths[id_min_interval]))
+
+    Y_frac = errors[-1] / errors[0]
+    # err0_min = np.max([errors[0], 0.02*Y_frac])
+
+    rel_err = errors[0] + 0.5 * (errors[-1] - errors[0]) / np.sqrt(Y_frac)
+    rel_err = np.min([rel_err, errors[0] + 0.6 * (errors[-1] - errors[0])])
+    min_error_index = np.argmin(np.abs(errors - rel_err))
+    est = np.max([widths[min_error_index], widths[id_min_interval]])
+
+    # fig, ax = plt.subplots()
+    # ax.plot(widths, errors)
+    # ax.scatter(widths[min_error_index], errors[min_error_index], c='r')
+    # plt.show()
+    # print('last rel error: ' + str(errors[-1]/errors[0]))
+    # print('est 1 (relative error): ' + str(widths[min_error_index]))
+    # print('est 2 (distance between peaks): ' + str(widths[id_min_interval]))
+    print("Estimated kernel width = %1.1fh" % est)
+    return est
 
 
 def find_rotation_period(ss, lcc, x=None, y=None):
@@ -436,9 +443,9 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
     def get_col(i):
 
         if i == 1:
-            return 'k'
+            return plt.cm.Paired(6)
         else:
-            return 0.4, 0.4, 0.4
+            return plt.cm.Paired(7)
 
     if lcc.found_rotation_period > 0:
         while tim < t[-1] - lcc.found_rotation_period:
@@ -565,6 +572,8 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
         ax4.set_xlabel('Time [days]')
         plt.show()
 
+        return fig
+
 
 def Jackknives(ss, lcc):
     fig = plt.figure()
@@ -642,7 +651,7 @@ def ACF_small_increments(ss, lcc, ax, fig):
 
             f = lcc.lc.flux.value[lcc.lc.time.value < t_high]
             f = f[mask]
-            [x, y, yb] = ACF(ss, lcc.lc.time.value, f, timestep=10)
+            [x, y, yb] = ACF(ss, lcc, lcc.lc.time.value, f, timestep=10)
 
             P, Perr, maxs_x, maxs_y, highest_peak, i, all_P = find_rotation_period(
                 ss, lcc, x, yb)
@@ -709,7 +718,7 @@ def ACF_remove_increments(ss, lcc, ax, ax2, ax7, ax8):
             f[mask] = 1
 
             # a bit less precise to save time
-            [x, y, yb] = ACF(ss, lcc.lc.time.value, f, timestep=10)
+            [x, y, yb] = ACF(ss, lcc, lcc.lc.time.value, f, timestep=10)
 
             P, Perr, maxs_x, maxs_y, highest_peak, i, all_P = find_rotation_period(
                 ss, lcc, x, yb)
@@ -778,7 +787,7 @@ def ACF_remove_increments(ss, lcc, ax, ax2, ax7, ax8):
     ax8.set_ylabel('Relative peak height h$_p$')
 
 
-def make_lcs(results, split_lc=True):
+def make_lcs(results, gaussian_kernel_width_hours, split_lc=True):
     section_size = 0
     section = []
     lcs = []
@@ -837,6 +846,9 @@ def make_lcs(results, split_lc=True):
             lcs.append(lc_container(results.download().remove_nans().normalize()))
     else:
         lcs.append(lc_container(results.download_all().stitch().remove_nans().normalize()))
+
+    for lc in lcs:
+        lc.gaussian_kernel_width_hours = gaussian_kernel_width_hours
 
     return lcs
 
@@ -974,7 +986,7 @@ def get_confirmed():
     return df
 
 
-def get_system(name, gaussian_kernel_width_hours=12):
+def get_system(name):
 
     df = get_confirmed()
     TOIs = get_Unconfirmed_TOIs(5)
@@ -1008,21 +1020,20 @@ def get_system(name, gaussian_kernel_width_hours=12):
     if mask.sum() == 1:
         sys = df.loc[mask]
     if mask.sum() == 0:
-        print(name +" not recognized. Is this a planet host? If so, try a different name ")
+        print(name + " not recognized. Is this a planet host? If so, try a different name ")
         sys = None
 
     if sys is None:
-        ss = System(name, gaussian_kernel_width_hours=gaussian_kernel_width_hours)
+        ss = System(name)
     else:
-        ss = System(name, gaussian_kernel_width_hours=gaussian_kernel_width_hours, T_eff=float(sys['st_teff']),
-                   orbital_period=float(sys['pl_orbper']), transit_duration=float(sys['pl_trandur'])/24,
-                   R=float(sys['st_rad']), R_err=float(sys['st_raderr1']),
-                   vsini=float(sys['st_vsin']), vsini_err=float(sys['st_vsinerr2']),
-                   i_o=float(sys['pl_orbincl'])*np.pi/180, i_o_err=float(sys['pl_orbinclerr1'])*np.pi/180)
+        ss = System(name, T_eff=float(sys['st_teff']),
+                    orbital_period=float(sys['pl_orbper']), transit_duration=float(sys['pl_trandur'])/24,
+                    R=float(sys['st_rad']), R_err=float(sys['st_raderr1']),
+                    vsini=float(sys['st_vsin']), vsini_err=float(sys['st_vsinerr2']),
+                    i_o=float(sys['pl_orbincl'])*np.pi/180, i_o_err=float(sys['pl_orbinclerr1'])*np.pi/180)
 
     for n in range(len(rt)):
         if rt.loc[n]['system'] == name:
-            print('found system in review table too')
             ss.lmbda = rt.loc[n]['lam_ori']*np.pi/180
             ss.lmbda_err1 = rt.loc[n]['lam_ori_down']*np.pi/180
             ss.lmbda_err2 = rt.loc[n]['lam_ori_up']*np.pi/180
@@ -1063,13 +1074,11 @@ def Rotation_period(ss, lcc, jackknives=False):
         original_lc, mask = transit_mask(ss, lcc)
 
     lcc.lc = fill_gaps(lcc.lc)
-    #t0 = time.time()
-    lcc.ac_x, lcc.ac_y, lcc.ac_y_smoothed = ACF(ss, lcc.lc.time.value, lcc.lc.flux.value)
-    #print('ACF took {} seconds'.format(time.time() - t0))
+    lcc.ac_x, lcc.ac_y, lcc.ac_y_smoothed = ACF(ss, lcc, lcc.lc.time.value, lcc.lc.flux.value)
     lcc.found_rotation_period, lcc.found_rotation_period_err, maxs_x, maxs_y, highest_peak, lcc.indeces, lcc.all_periods = find_rotation_period(
         ss, lcc)
 
-    plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, original_lc, mask)
+    fig = plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, original_lc, mask)
 
     print("Rvar = " + str(Rvar(lcc.lc.flux.value)))
     print("h_p = " + str(highest_peak))
@@ -1080,13 +1089,12 @@ def Rotation_period(ss, lcc, jackknives=False):
     if jackknives:
         Jackknives(ss, lcc)
 
-    return ss
+    return ss, fig
 
 
-def get_lightcurves_and_rotation_period(n, obliquity=True, gaussian_kernel_width_hours=0, jackknives=False): # First check for SPOC light curve, if not available, use Full Frame Images instead.
-
-    ss = get_system(n, gaussian_kernel_width_hours)
-
+def get_lightcurves_and_rotation_period(n, obliquity=True, gaussian_kernel_width_hours=0, jackknives=False):  # First check for SPOC light curve, if not available, use Full Frame Images instead.
+    ss = get_system(n)
+    figs = []
     authors = ['SPOC', 'TESS-SPOC', 'QLP']
     exptimes = [120, None, None]
     titles = ['SPOC', 'TESS-SPOC (from Full-Frame Images)', 'QLP (MIT Quick-Look Pipeline from FFI)']
@@ -1109,26 +1117,22 @@ def get_lightcurves_and_rotation_period(n, obliquity=True, gaussian_kernel_width
             if ss.lmbda is not None:
                 ss.title += ". $\lambda = %1.1f^{+%1.1f^\circ}_{-%1.1f^\circ}$" % (ss.lmbda*180/np.pi, ss.lmbda_err1*180/np.pi, ss.lmbda_err2*180/np.pi)
 
-            ss.lccs = make_lcs(results, ss.split_lc)
+            ss.lccs = make_lcs(results, gaussian_kernel_width_hours, ss.split_lc)
 
             for lcc in ss.lccs:
-                s = Rotation_period(ss, lcc, jackknives)
+                s, f = Rotation_period(ss, lcc, jackknives)
+                figs.append(f)
 
-                if obliquity and lcc.found_rotation_period is not None:
-                    obl.obliquity(s, lcc)
+                if obliquity:
+                    figs.append(obl.obliquity(s, lcc))
 
             if c == 0:  # if SPOC lightcurve is available, don't look for FFI lightcurves
                 break
-    return ss
-            
-# ss = System(name = "WASP-94 A",gaussian_kernel_width_hours = 1500, transit_first_time=2039.3383278861388,transit_duration=0.25, orbital_period=	3.9501907)
-# ss = System(name = "KELT-3",gaussian_kernel_width_hours = 500, transit_first_time=2610.8775088109537,transit_duration=0.15, orbital_period=2.703650365036504)
-# ss = System(name = "WASP-76",gaussian_kernel_width_hours = 1000, transit_first_time=2117.680843398725,transit_duration=0.2, orbital_period=	1.809886)
-# ss = System(name = "WASP-167")
-# ss = System(name = "KELT-4",gaussian_kernel_width_hours = 650, transit_first_time=2610.3928999130444,transit_duration=0.15, orbital_period=2.9895933)
-# ss = System(name = "TOI-1431",gaussian_kernel_width_hours = 1450, transit_first_time=1712.6644674100228,transit_duration=0.15, orbital_period=2.6510451045104513)
-# ss = System(name="XO-6", transit_first_time=1817.58,transit_duration=0.12, orbital_period=3.7650007, gaussian_kernel_width_hours = 220, split_lc = True, override_period=1.8)
-# ss = System(name="WASP-12", transit_first_time=1843, transit_duration=0.12483, orbital_period=1.0914203, gaussian_kernel_width_hours=1500)
+    return ss, figs
 
 
-s = get_lightcurves_and_rotation_period('WASP-12')
+ss, figs = get_lightcurves_and_rotation_period('WASP-12', obliquity=True, jackknives=True)
+
+for c, f in enumerate(figs):
+    if f is not None:
+        f.savefig(ss.name + "v" + str(c+1) + '.png')

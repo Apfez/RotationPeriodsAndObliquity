@@ -149,7 +149,7 @@ def make_plot(s, lcc, bins, v, v_p, i_s, i_sp, psi, psip, psi_mean, psi_err, i_s
 
     ######################### AXIS 7 ##############################
 
-    res = 80
+    res = 150
     azimuth = 120
     elev = 30
 
@@ -207,6 +207,7 @@ def make_plot(s, lcc, bins, v, v_p, i_s, i_sp, psi, psip, psi_mean, psi_err, i_s
     ax.plot(R, gaussian(s.R, s.R_err, R), c='pink', lw=6)
     ax.set_xlabel('$R$ [$R_\odot$]', fontsize=20)
     ax.set_yticks([])
+    ax.set_title(s.name)
 
     ######################### AXIS 3 ##############################
 
@@ -216,7 +217,7 @@ def make_plot(s, lcc, bins, v, v_p, i_s, i_sp, psi, psip, psi_mean, psi_err, i_s
     ax.plot(v, v_p/np.abs(np.trapz(v_p, v)), c='brown', lw=6)
     ax.set_xlabel('Rotation speed [km/s]', fontsize=20)
     ax.set_yticks([])
-    ax.legend(['vsini', 'v'], fontsize=20)
+    ax.legend(['vsin$i_s$', 'v'], fontsize=20)
 
     ######################### AXIS 4 ##############################
 
@@ -234,7 +235,7 @@ def make_plot(s, lcc, bins, v, v_p, i_s, i_sp, psi, psip, psi_mean, psi_err, i_s
     x = xbins + 0.5 * (xbins[1] - xbins[0])
     lmbda = x[:-1]
 
-    x = lmbda*180/np.pi
+    x = np.abs(lmbda)*180/np.pi
     y = counts / np.trapz(counts, x)
 
     lmbda_handle, = ax.plot(x, y, c='C2', lw=6)
@@ -371,6 +372,10 @@ def check_params(s, lcc):
             print('Need at minimum vsini, R, and P')
             return False
 
+    if lcc.found_rotation_period == 0:
+        print('Did not find a rotation period')
+        return False
+
     return True
 
 
@@ -378,6 +383,8 @@ def obliquity(s, lcc, N=400000, bins=80):
     fig = None
 
     if check_params(s, lcc):
+        print("found period")
+        print(lcc.found_rotation_period)
         v, v_p = calc_v(s, lcc, N, bins)
         cosi, cosip, i_s, i_sp = calc_i(s, lcc, v, v_p, bins)
         psi, psip, psi_mean, psi_err, i_s_samples, lmbda_samples = calc_psi(s, cosi, cosip, N, bins)
