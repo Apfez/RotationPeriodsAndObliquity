@@ -130,7 +130,6 @@ def calc_psi(s, cosi, cosip, N, bins):
 
     return x, counts, psi_mean, psi_err, i_samples, lmbda_samples
 
-
 def make_plot(s, lcc, bins, v, v_p, i_s, i_sp, psi, psip, psi_mean, psi_err, i_s_samples, lmbda_samples):
     fig = plt.figure()
     fig.tight_layout()
@@ -234,9 +233,18 @@ def make_plot(s, lcc, bins, v, v_p, i_s, i_sp, psi, psip, psi_mean, psi_err, i_s
     counts, xbins = np.histogram(lmbda_samples, bins)
     x = xbins + 0.5 * (xbins[1] - xbins[0])
     lmbda = x[:-1]
-
-    x = np.abs(lmbda)*180/np.pi
-    y = counts / np.trapz(counts, x)
+    
+    if s.lmbda is not None and s.lmbda < 0:
+        x = -lmbda*180/np.pi
+        y = np.abs(counts / np.trapz(counts, x))
+        
+        mask = x > 0
+        x = x[mask]
+        y = y[mask]
+    else:
+        x = lmbda*180/np.pi
+        
+        y = np.abs(counts / np.trapz(counts, x))
 
     lmbda_handle, = ax.plot(x, y, c='C2', lw=6)
     maxy = ax.get_ylim()[1]

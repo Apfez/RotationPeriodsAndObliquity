@@ -73,8 +73,8 @@ class System(object):
 
     def calculate_max_period(self):
 
-        R_max = self.R + self.R_err * 2
-        vsini_min = self.vsini - self.vsini_err * 2
+        R_max = self.R + np.abs(self.R_err)
+        vsini_min = self.vsini - np.abs(self.vsini_err)
 
         # Simple calculation to take into account uncertainty in vsini and R when finding the maximum rotation period. That is, P if v = vsini.
         return 2 * np.pi * R_max * 695700 / vsini_min  * 1 / (24 * 3600)
@@ -212,7 +212,7 @@ def estimate_kernel_width(ss, ac_x, ac_y, timestep):  # purely magical numbers. 
     Y_frac = errors[-1] / errors[0]
     # err0_min = np.max([errors[0], 0.02*Y_frac])
 
-    rel_err = errors[0] + 0.5 * (errors[-1] - errors[0]) / np.sqrt(Y_frac)
+    rel_err = errors[0] + 0.2 * (errors[-1] - errors[0]) / np.sqrt(Y_frac)
     rel_err = np.min([rel_err, errors[0] + 0.6 * (errors[-1] - errors[0])])
     min_error_index = np.argmin(np.abs(errors - rel_err))
     est = np.max([widths[min_error_index], widths[id_min_interval]])
@@ -515,7 +515,7 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
         ss.handles.append(h)
         ss.names.append('Determined period')
 
-        ax2.legend(ss.handles, ss.names, bbox_to_anchor=(1.02, 0.75))
+        ax2.legend(ss.handles, ss.names, bbox_to_anchor=(1.11, 0.75))
         ax2.set_title('ACF')
         ax2.set_xlabel(r"$\tau_k$ [days]")
         ax2.set_ylabel('$r_k$')
@@ -893,7 +893,7 @@ def draw_extra_rotation_lines(ss, ax):
 
     if ss.orbital_period is not None and ss.orbital_period < xmax:
 
-        kwargs = {'color': 'pink', 'linewidth': 3, 'alpha': 1, 'linestyle' : 'dotted'}
+        kwargs = {'color': 'blue', 'linewidth': 3, 'alpha': 1, 'linestyle' : 'dotted'}
         ss.handles.append(vertical_line(ss.orbital_period, ax, kwargs))
         ss.names.append("Orbital period = %1.1fd" % ss.orbital_period)
 
@@ -1092,8 +1092,49 @@ def Rotation_period(ss, lcc, jackknives=False):
     return ss, fig
 
 
-def get_lightcurves_and_rotation_period(n, obliquity=True, gaussian_kernel_width_hours=0, jackknives=False):  # First check for SPOC light curve, if not available, use Full Frame Images instead.
+def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width_hours=0, override_period=None, jackknives=False, vsini=None, vsini_err=None, lmbda=None, lmbda_err1=None, lmbda_err2=None, i_o=None, i_o_err=None):  # First check for SPOC light curve, if not available, use Full Frame Images instead.
+    """
+    Searches the `MAST data archive <https://archive.stsci.edu> for light curves,
+    masks out transits and finds rotation periods with the Auto-Correlation Function.
+    
+    Use TIC name, "standard" name or TOI.
+    (examples: "TIC 375506058", "WASP-167", "TOI-1431")
+    
+    Finds relevant physical parameters and uncertainties: 
+    Orbital period, transit duration, stellar radius, projected rotation speed, projected obliquity and orbital inclination
+    by cross-referencing the NASA-exoplanet Archive and TEPCat.
+    
+    If no values are found or the current are wished to be overwritten, this can be done with the following key-words:
+        
+    lmbda, lmbda_err1, lmbda_err2, i_o, i_o_err, vsini, rotation period
+    
+    The obliquity plot can be turned off with
+    obliquity = False
+    
+    and additional tests of the robustness of the period detection can be enabled with
+    jackknives = True
+    
+    """
+
     ss = get_system(n)
+
+    if override_period is not None:
+        ss.override_period = override_period
+    if vsini is not None:
+        ss.vsini = vsini
+    if vsini_err is not None:
+        ss.vsini_err = vsini_err
+    if lmbda is not None:
+        ss.lmbda = lmbda
+    if lmbda_err1 is not None:
+        ss.lmbda_err1 = lmbda_err1
+    if lmbda_err2 is not None:
+        ss.lmbda_err2 = lmbda_err2
+    if i_o is not None:
+        ss.i_o = i_o
+    if i_o_err is not None:
+        ss.i_o_err = i_o_err
+    
     figs = []
     authors = ['SPOC', 'TESS-SPOC', 'QLP']
     exptimes = [120, None, None]
@@ -1106,7 +1147,7 @@ def get_lightcurves_and_rotation_period(n, obliquity=True, gaussian_kernel_width
             name = ss.name + ".01"
 
         results = lk.search_lightcurve(name, mission="TESS", author=a, exptime=exptimes[c])
-
+        
         if len(results) != 0:
             ss.exptime = results[0].exptime[0].value
             ss.title = titles[c]
@@ -1128,11 +1169,22 @@ def get_lightcurves_and_rotation_period(n, obliquity=True, gaussian_kernel_width
 
             if c == 0:  # if SPOC lightcurve is available, don't look for FFI lightcurves
                 break
-    return ss, figs
+            
+    for c, f in enumerate(figs):
+        if f is not None:
+            f.savefig(ss.name + "v" + str(c+1) + '.pdf')
+            
+    return ss
+
+######### EXAMPLES #########
+
+######### Get lightcurve and obliquity plot using available values from the NASA-exoplanet Archive and TEPCat:
+# lightcurve_rotationPeriod_obliquity("Kepler-63")
 
 
-ss, figs = get_lightcurves_and_rotation_period('WASP-12', obliquity=True, jackknives=True)
+######### Assign values to vsini, lambda, i_o and uncertainties manually:
+# lightcurve_rotationPeriod_obliquity("TOI-2025", vsini=6, vsini_err=0.3, lmbda=9*np.pi/180, lmbda_err1=34*np.pi/180, lmbda_err2=36*np.pi/180, i_o=88.6*np.pi/180, i_o_err=1.4*np.pi/180)
 
-for c, f in enumerate(figs):
-    if f is not None:
-        f.savefig(ss.name + "v" + str(c+1) + '.png')
+
+######### Adjust the gaussian kernel width manually to make the smoothing better match the ACF. Also, in cases where the highest peak is obviously not the correct period, you can override the found one with a peak near "override period":
+# lightcurve_rotationPeriod_obliquity("WASP-12", gaussian_kernel_width_hours=24, override_period=8.5, obliquity=False)
