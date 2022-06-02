@@ -32,7 +32,7 @@ plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 class System(object):
 
     def __init__(self, name, T_eff=None, vsini=None, vsini_err=None, R=None, R_err=None,
-                 transit_first_time=None, transit_duration=None, orbital_period=None, split_lc=True, override_period=None,
+                 transit_first_time=None, transit_duration=None, orbital_period=None, override_period=None,
                  lmbda=None, lmbda_err1=None, lmbda_err2=None, i_o=np.pi/2, i_o_err=2*np.pi/180):
 
         self.name = name
@@ -50,7 +50,6 @@ class System(object):
         self.transit_duration = transit_duration
         self.orbital_period = orbital_period
 
-        self.split_lc = split_lc
         self.lccs = None
         self.title = None
         self.exptime = None
@@ -132,11 +131,11 @@ def fill_gaps(lc):
     return lc
 
 
-def ACF(ss, lcc, t, f, timestep=2):
+def ACF(ss, lcc, t, f, timestep=4):
     dt = np.nanmedian(t[1:] - t[:-1])
     N = len(f)
 
-    maxK = np.min([int(70 / dt), int(np.floor(N / (2 * timestep)))])
+    maxK = np.min([int(50 / dt), int(np.floor(N / (2 * timestep)))])
 
     ac_x = np.zeros(maxK)
     ac_y = np.zeros(maxK)
@@ -258,8 +257,8 @@ def find_rotation_period(ss, lcc, x=None, y=None):
     # run through all maxima and find the one with highest relative peak height
     for n in range(len(maxs_x)):
 
-        if ss.override_period is not None and maxs_x[n] > 1 / buffer * ss.override_period and maxs_x[
-            n] < buffer * ss.override_period:
+        if ss.override_period is not None and maxs_x[n] > 1 / (buffer-0.2) * ss.override_period and maxs_x[
+            n] < (buffer-0.2) * ss.override_period:
             relative_peak_height, rotP_err, x_HW, y_HW = h_p(maxs_x[n], maxs_y[n], mins_x, mins_y, x, y)
 
             P = maxs_x[n]
@@ -322,10 +321,15 @@ def find_rotation_period(ss, lcc, x=None, y=None):
                     rotation_period = P
 
                 elif len(all_periods) > 2:
+        
                     z, cov = np.polyfit(i, all_periods, 1, cov=True)
-                    rotation_period = z[0]
-                    rotation_period_error = np.sqrt(np.diag(cov))[0]
+                    #rotation_period = z[0]
+                    #rotation_period_error = np.sqrt(np.diag(cov))[0]
 
+                    rotation_period = np.mean(np.array(all_periods)[1:]/np.array(i)[1:])
+                    rotation_period_error = np.std(np.array(all_periods)[1:]/np.array(i)[1:])
+  
+                    
                 if x - all_periods[-1] < 1 / buffer * rotation_period:
                     newP = []
                 elif x - all_periods[-1] > 1 / buffer * rotation_period and x - all_periods[
@@ -336,7 +340,8 @@ def find_rotation_period(ss, lcc, x=None, y=None):
                     break
 
         maxs_x = maxs_x[:-1]
-
+        
+    
     return rotation_period, rotation_period_error, maxs_x, maxs_y, highest_peak, i, all_periods
 
 
@@ -515,7 +520,7 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
         ss.handles.append(h)
         ss.names.append('Determined period')
 
-        ax2.legend(ss.handles, ss.names, bbox_to_anchor=(1.11, 0.75))
+        
         ax2.set_title('ACF')
         ax2.set_xlabel(r"$\tau_k$ [days]")
         ax2.set_ylabel('$r_k$')
@@ -532,9 +537,20 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
         ax3.set_title('Period determination')
 
         if len(lcc.all_periods) > 2:
-
+            
+            y = np.array(lcc.all_periods[1:])
+            x = np.array(lcc.indeces[1:])
+            y = y/x
+            ax3.scatter(x,y, color = 'orange')
+            ax3.plot([x.min(),x.max()],[lcc.found_rotation_period,lcc.found_rotation_period], color = 'black')
+            ax3.text(x.min(),lcc.found_rotation_period, "$P_{rot} = $%1.2f$\pm$%1.2fd" % (
+                lcc.found_rotation_period, lcc.found_rotation_period_err))
+            
+            ax3.set_xlabel('index of local maximum')
+            ax3.set_ylabel(r"$\tau_k$ [days] of local maximum")
+            """
             ax3.scatter(lcc.all_periods, lcc.indeces, color='orange')
-
+            
             x = np.linspace(0, np.max(lcc.indeces), 100)
             ax3.plot(lcc.found_rotation_period * x, x, color='purple')
 
@@ -543,6 +559,8 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
             ax3.set_xlabel(r"$\tau_k$ [days] of local maximum")
             ax3.text(0.5*np.max(lcc.indeces), 1.2, "$P_{rot} = $%1.2f$\pm$%1.2f" % (
                 lcc.found_rotation_period, lcc.found_rotation_period_err))
+            """
+            
 
         else:
             ax3.plot(lcc.x_HWHM, lcc.y_HWHM, color='k', linewidth=4)
@@ -570,8 +588,10 @@ def plot_LC_and_ACF(ss, lcc, maxs_x, maxs_y, lc_original, mask):
         ax4.set_xlim([min(folded.time.value), max(folded.time.value)])
         ax4.set_yticks([])
         ax4.set_xlabel('Time [days]')
+        
+        fig.legend(ss.handles, ss.names, bbox_to_anchor=(0.88, 0.38),ncol =3, fontsize = 17)
         plt.show()
-
+        
         return fig
 
 
@@ -1010,7 +1030,11 @@ def get_system(name):
 
     mask = np.any([
         df['hostname'] == name,
-        df['tic_id'] == name
+        df['hostname'] == name + " A",
+        df['hostname'] == name + " B",
+        df['hostname'] == name + " C",
+        df['tic_id'] == name,
+        
     ], axis=0)
 
     rt = pd.read_csv('planets_review_table.csv')
@@ -1092,7 +1116,7 @@ def Rotation_period(ss, lcc, jackknives=False):
     return ss, fig
 
 
-def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width_hours=0, override_period=None, jackknives=False, vsini=None, vsini_err=None, lmbda=None, lmbda_err1=None, lmbda_err2=None, i_o=None, i_o_err=None):  # First check for SPOC light curve, if not available, use Full Frame Images instead.
+def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width_hours=0, override_period=None, split_lc = True, jackknives=False, vsini=None, vsini_err=None, lmbda=None, lmbda_err1=None, lmbda_err2=None, i_o=None, i_o_err=None):  # First check for SPOC light curve, if not available, use Full Frame Images instead.
     """
     Searches the `MAST data archive <https://archive.stsci.edu> for light curves,
     masks out transits and finds rotation periods with the Auto-Correlation Function.
@@ -1146,7 +1170,7 @@ def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width
         if ss.name[0:3] == "TOI":
             name = ss.name + ".01"
 
-        results = lk.search_lightcurve(name, mission="TESS", author=a, exptime=exptimes[c])
+        results = lk.search_lightcurve(name, mission="TESS", author=a, exptime=exptimes[c]) #, sector=[30,31,32,33,34,35, 36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58]
         
         if len(results) != 0:
             ss.exptime = results[0].exptime[0].value
@@ -1158,7 +1182,7 @@ def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width
             if ss.lmbda is not None:
                 ss.title += ". $\lambda = %1.1f^{+%1.1f^\circ}_{-%1.1f^\circ}$" % (ss.lmbda*180/np.pi, ss.lmbda_err1*180/np.pi, ss.lmbda_err2*180/np.pi)
 
-            ss.lccs = make_lcs(results, gaussian_kernel_width_hours, ss.split_lc)
+            ss.lccs = make_lcs(results, gaussian_kernel_width_hours, split_lc)
 
             for lcc in ss.lccs:
                 s, f = Rotation_period(ss, lcc, jackknives)
@@ -1176,6 +1200,7 @@ def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width
             
     return ss
 
+
 ######### EXAMPLES #########
 
 ######### Get lightcurve and obliquity plot using available values from the NASA-exoplanet Archive and TEPCat:
@@ -1188,3 +1213,4 @@ def lightcurve_rotationPeriod_obliquity(n, obliquity=True, gaussian_kernel_width
 
 ######### Adjust the gaussian kernel width manually to make the smoothing better match the ACF. Also, in cases where the highest peak is obviously not the correct period, you can override the found one with a peak near "override period":
 # lightcurve_rotationPeriod_obliquity("WASP-12", gaussian_kernel_width_hours=24, override_period=8.5, obliquity=False)
+
